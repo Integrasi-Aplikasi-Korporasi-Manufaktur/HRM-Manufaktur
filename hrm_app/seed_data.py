@@ -121,13 +121,15 @@ DEFAULT_PARTNERS = [
         "api_key_value": "",
         "endpoints_json": json.dumps({
             "health": "/health",
-            "submit_payroll": "/v1/payroll/disbursement",
-            "check_payroll_status": "/v1/payroll/status/{batch_code}",
-            "check_recruitment_budget": "/v1/anggaran/cek-rekrutmen",
+            "submit_payroll": "/v1/payroll-accruals",
+            "check_payroll_status": "/v1/payroll-accruals/{run_id}",
+            "check_recruitment_budget": "/v1/budget-reservations",
+            "check_budget_remaining": "/v1/budgets/{cost_center}/remaining",
+            "budget_report": "/v1/reports/budget",
         }),
         "field_mapping_json": json.dumps({
-            "batch_code_field": "batch_code",
-            "total_amount_field": "total_net",
+            "batch_code_field": "payroll_run_id",
+            "total_amount_field": "total_net_minor",
             "status_field": "status",
             "reference_field": "finance_ref",
             "approved_field": "approved",
@@ -191,6 +193,7 @@ DEFAULT_INBOUND_CLIENTS = [
 def _clear_business_tables(conn) -> None:
     """Menghapus data bisnis sebelum mengisi preset tema baru."""
     for tbl in (
+        "idempotency_records",
         "payroll_items",
         "payroll_runs",
         "applicants",

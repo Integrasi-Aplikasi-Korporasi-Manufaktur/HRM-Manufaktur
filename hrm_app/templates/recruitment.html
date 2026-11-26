@@ -159,7 +159,7 @@ async function refreshRecruitment() {
       <td class="p-3">${statusBadge(m.requester_system)}</td>
       <td class="p-3">
         <div class="font-semibold text-slate-900">${esc(m.position_title)}</div>
-        <div class="text-xs text-slate-500">${esc(m.department_name)} · ${esc(m.reason)}</div>
+        <div class="text-xs text-slate-500">${esc(m.department_name)} (${esc(m.cost_center || '-')}) · Periode ${esc(m.period || '2026-11')} · ${esc(m.reason)}</div>
       </td>
       <td class="p-3 text-right">
         <div class="font-semibold">${m.headcount} org</div>
@@ -170,9 +170,12 @@ async function refreshRecruitment() {
         ${m.finance_ref ? `<div class="text-[11px] font-mono text-slate-500 mt-1">${esc(m.finance_ref)}</div>` : ''}
       </td>
       <td class="p-3">${statusBadge(m.hiring_status)} <span class="text-xs text-slate-500">(${m.hired_count}/${m.headcount})</span></td>
-      <td class="p-3 text-right">
+      <td class="p-3 text-right space-x-1 whitespace-nowrap">
+        <button onclick="checkRemainingBudget('${esc(m.cost_center || 'CC-300')}', '${esc(m.period || '2026-11')}')" class="px-2.5 py-1.5 text-xs border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg font-semibold">
+          💰 Sisa Anggaran
+        </button>
         <button onclick="checkBudget(${m.id})" class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">
-          💳 Cek Budget ke Keuangan
+          💳 Reservasi Budget
         </button>
       </td>
     </tr>
@@ -231,14 +234,24 @@ async function submitMR(ev) {
   }
 }
 
+async function checkRemainingBudget(costCenter, period) {
+  try {
+    const res = await apiFetch(`/api/v1/budgets/${encodeURIComponent(costCenter)}/remaining?period=${encodeURIComponent(period)}`);
+    showToast(`Sisa anggaran ${costCenter} (${period}): ${formatRupiah(res.remaining_minor)}`, "info");
+  } catch (err) {
+    showToast("Gagal cek sisa anggaran: " + err.message, "error");
+  }
+}
+
 async function checkBudget(reqId) {
   try {
-    showToast("Mengirim permohonan anggaran ke Keuangan (Kel. 2)...", "info");
+    showToast("Mengajukan BudgetReservation ke Keuangan (Kel. 2)...", "info");
     const res = await apiFetch(`/api/v1/manpower-requests/${reqId}/check-budget`, { method: "POST" });
     showToast(`Respon Keuangan: ${res.finance_budget_status} (${res.finance_ref})`);
     await refreshRecruitment();
   } catch (err) {
-    showToast("Gagal cek anggaran ke Keuangan: " + err.message, "error");
+    showToast("Gagal reservasi anggaran Keuangan: " + err.message, "error");
+    await refreshRecruitment();
   }
 }
 

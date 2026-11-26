@@ -1,12 +1,14 @@
 """Adapter Integrasi Lintas Kelompok (Keuangan Kel. 2, CRM Kel. 7, SCM Kel. 8)."""
 import json
 import time
+import uuid
 from datetime import datetime
 from typing import Any
 
 import requests
 
 from hrm_app.auth import record_integration_log
+from hrm_app.config import DEFAULT_PERIOD
 from hrm_app.database import db_session
 
 # Cache token outbound sementara di memori agar tidak selalu meminta token baru
@@ -95,6 +97,7 @@ def _call_partner(
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
     require_auth: bool = True,
+    extra_headers: dict[str, str] | None = None,
 ) -> tuple[bool, int, Any, dict[str, Any]]:
     """Memanggil API sistem mitra dengan pencatatan log dan dukungan adapter mapping."""
     partner = _get_partner(partner_key)
@@ -107,7 +110,17 @@ def _call_partner(
 
     ep_path = ep_template.format(**(path_params or {}))
     url = f"{partner['base_url'].rstrip('/')}/{ep_path.lstrip('/')}"
-    headers = _build_auth_headers(partner) if require_auth else {"ngrok-skip-browser-warning": "true"}
+    req_id = (extra_headers or {}).get("X-Request-ID") or str(uuid.uuid4())
+    headers = (
+        _build_auth_headers(partner)
+        if require_auth
+        else {"ngrok-skip-browser-warning": "true", "Accept": "application/json"}
+    )
+    if extra_headers:
+        for k, v in extra_headers.items():
+            if k.lower() != "authorization":
+                headers[k] = v
+    headers.setdefault("X-Request-ID", req_id)
 
     t0 = time.perf_counter()
     try:
@@ -122,6 +135,11 @@ def _call_partner(
         # Retry satu kali jika token kedaluwarsa (401) pada OAUTH_BEARER
         if resp.status_code == 401 and require_auth and partner.get("auth_type") == "OAUTH_BEARER":
             headers = _build_auth_headers(partner, force_refresh=True)
+            if extra_headers:
+                for k, v in extra_headers.items():
+                    if k.lower() != "authorization":
+                        headers[k] = v
+            headers.setdefault("X-Request-ID", req_id)
             resp = requests.request(
                 method=method.upper(),
                 url=url,
@@ -263,35 +281,75 @@ def fetch_scm_overtime(period: str) -> dict[str, Any]:
 
 
 def submit_payroll_to_finance(payroll_run: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Mengirim tagihan rekap payroll HRM ke sistem Keuangan (Kelompok 2)."""
+    """Mengirim tagihan rekap PayrollAccrual HRM ke sistem Keuangan (Kelompok 2)."""
+    sum_gross = sum(int(it["gross_salary"]) for it in items)
+    sum_ded = sum(int(it["tax_pph21"]) + int(it["bpjs_deduction"]) + int(it["absent_deduction"]) for it in items)
+    sum_net = sum(int(it["net_salary"]) for it in items)
+    if (
+        sum_gross != int(payroll_run["total_gross"])
+        or sum_ded != int(payroll_run["total_deductions"])
+        or sum_net != int(payroll_run["total_net"])
+    ):
+        return {
+            "success": False,
+            "status_code": 422,
+            "error": {
+                "error": {
+                    "code": "PAYROLL_TOTAL_MISMATCH",
+                    "message": "Total baris karyawan tidak sama dengan total batch payroll.",
+                }
+            },
+        }
+
+    lines = [
+        {
+            "employee_code": it["employee_code"],
+            "full_name": it["full_name"],
+            "department_code": it.get("department_code", ""),
+            "department_name": it["department_name"],
+            "cost_center": it.get("cost_center", "CC-100"),
+            "base_salary_minor": int(it["base_salary"]),
+            "fixed_allowance_minor": int(it["fixed_allowance"]),
+            "overtime_pay_minor": int(it["overtime_pay"]),
+            "crm_commission_minor": int(it["crm_commission"]),
+            "tax_pph21_minor": int(it["tax_pph21"]),
+            "bpjs_deduction_minor": int(it["bpjs_deduction"]),
+            "absent_deduction_minor": int(it["absent_deduction"]),
+            "gross_salary_minor": int(it["gross_salary"]),
+            "deductions_minor": int(it["tax_pph21"]) + int(it["bpjs_deduction"]) + int(it["absent_deduction"]),
+            "net_salary_minor": int(it["net_salary"]),
+            "bank_name": it["bank_name"],
+            "bank_account": it["bank_account"],
+        }
+        for it in items
+    ]
     payload = {
+        "payroll_run_id": payroll_run["batch_code"],
+        "run_id": payroll_run["batch_code"],
         "batch_code": payroll_run["batch_code"],
         "period": payroll_run["period"],
-        "total_employees": payroll_run["total_employees"],
-        "total_gross": payroll_run["total_gross"],
-        "total_deductions": payroll_run["total_deductions"],
-        "total_net": payroll_run["total_net"],
-        "rincian_karyawan": [
-            {
-                "kode_karyawan": it["employee_code"],
-                "nama": it["full_name"],
-                "departemen": it["department_name"],
-                "bank": it["bank_name"],
-                "no_rekening": it["bank_account"],
-                "gaji_bersih": it["net_salary"],
-                "pajak_pph21": it["tax_pph21"],
-            }
-            for it in items
-        ],
+        "currency": "IDR",
+        "total_employees": int(payroll_run["total_employees"]),
+        "total_gross_minor": int(payroll_run["total_gross"]),
+        "total_deductions_minor": int(payroll_run["total_deductions"]),
+        "total_net_minor": int(payroll_run["total_net"]),
+        "lines": lines,
     }
-    ok, code, data, partner = _call_partner("keuangan", "POST", "submit_payroll", json_body=payload)
+    idem_key = f"payroll-accrual:{payroll_run['batch_code']}:{payroll_run['period']}"
+    ok, code, data, partner = _call_partner(
+        "keuangan",
+        "POST",
+        "submit_payroll",
+        json_body=payload,
+        extra_headers={"Idempotency-Key": idem_key},
+    )
     if not ok:
         return {"success": False, "status_code": code, "error": data}
 
     fmap = partner["field_mapping"]
     ref_field = fmap.get("reference_field", "finance_ref")
     finance_ref = str(data.get(ref_field) or data.get("reference_id") or f"FIN-{payroll_run['batch_code']}")
-    fin_note = str(data.get("message") or "Diterima oleh Sistem Keuangan, menunggu pencairan.")
+    fin_note = str(data.get("message") or "PayrollAccrual diterima (POSTED) oleh Keuangan, menunggu pencairan.")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with db_session() as conn:
@@ -315,19 +373,27 @@ def submit_payroll_to_finance(payroll_run: dict[str, Any], items: list[dict[str,
 def poll_payroll_status_from_finance(batch_code: str) -> dict[str, Any]:
     """Mengecek status pencairan gaji batch tertentu di Sistem Keuangan (Kelompok 2)."""
     ok, code, data, partner = _call_partner(
-        "keuangan", "GET", "check_payroll_status", path_params={"batch_code": batch_code},
+        "keuangan",
+        "GET",
+        "check_payroll_status",
+        path_params={"run_id": batch_code, "batch_code": batch_code},
     )
     if not ok:
         return {"success": False, "status_code": code, "error": data}
 
     fmap = partner["field_mapping"]
     status_field = fmap.get("status_field", "status")
-    remote_status = str(data.get(status_field, "")).upper()
+    remote_status = str(data.get(status_field) or data.get("status") or "").upper()
+    payment_status = str(data.get("payment_status") or "").upper()
     fin_note = str(data.get("note") or data.get("message") or "")
     fin_ref = str(data.get(fmap.get("reference_field", "finance_ref"), "") or "")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mapped_local = "PAID" if remote_status in ("PAID", "LUNAS", "DISBURSED") else "SENT_TO_FINANCE"
+    mapped_local = (
+        "PAID"
+        if (remote_status in ("PAID", "LUNAS", "DISBURSED") or payment_status == "PAID")
+        else "SENT_TO_FINANCE"
+    )
     with db_session() as conn:
         conn.execute(
             """
@@ -338,37 +404,88 @@ def poll_payroll_status_from_finance(batch_code: str) -> dict[str, Any]:
                 updated_at = ?
             WHERE batch_code = ?
             """,
-            (mapped_local, fin_ref, fin_note or f"Status dari Keuangan: {remote_status}", now, batch_code),
+            (
+                mapped_local,
+                fin_ref,
+                fin_note or f"Status dari Keuangan: {remote_status} (PaymentStatus: {payment_status or '-'})",
+                now,
+                batch_code,
+            ),
         )
     return {
         "success": True,
         "status_code": code,
         "batch_code": batch_code,
         "remote_status": remote_status,
+        "payment_status": payment_status or ("PAID" if mapped_local == "PAID" else "UNPAID"),
         "local_status": mapped_local,
         "detail": data,
     }
 
 
+def check_budget_remaining_from_finance(cost_center: str, period: str = DEFAULT_PERIOD) -> dict[str, Any]:
+    """Memeriksa sisa anggaran cost center tertentu di Sistem Keuangan (Kelompok 2)."""
+    ok, code, data, _ = _call_partner(
+        "keuangan",
+        "GET",
+        "check_budget_remaining",
+        path_params={"cost_center": cost_center},
+        params={"period": period},
+    )
+    if not ok:
+        return {"success": False, "status_code": code, "cost_center": cost_center, "period": period, "error": data}
+    return {"success": True, "status_code": code, "cost_center": cost_center, "period": period, "data": data}
+
+
 def request_recruitment_budget_from_finance(manpower_req: dict[str, Any]) -> dict[str, Any]:
-    """Meminta persetujuan anggaran rekrutmen karyawan baru ke Sistem Keuangan (Kelompok 2)."""
+    """Mengajukan BudgetReservation rekrutmen karyawan baru ke Sistem Keuangan (Kelompok 2)."""
+    period = manpower_req.get("period") or DEFAULT_PERIOD
+    amount_minor = int(manpower_req["headcount"]) * int(manpower_req["estimated_salary"])
     payload = {
+        "manpower_request_id": manpower_req["request_code"],
         "request_code": manpower_req["request_code"],
+        "cost_center": manpower_req.get("cost_center") or "CC-300",
+        "department_code": manpower_req.get("department_code") or "",
+        "period": period,
+        "headcount": int(manpower_req["headcount"]),
+        "estimated_salary_minor": int(manpower_req["estimated_salary"]),
+        "amount_minor": amount_minor,
+        "currency": "IDR",
         "requester_system": manpower_req["requester_system"],
         "position_title": manpower_req["position_title"],
-        "headcount": manpower_req["headcount"],
-        "estimated_salary_per_head": manpower_req["estimated_salary"],
-        "total_monthly_budget": manpower_req["headcount"] * manpower_req["estimated_salary"],
         "reason": manpower_req["reason"],
     }
-    ok, code, data, partner = _call_partner("keuangan", "POST", "check_recruitment_budget", json_body=payload)
+    idem_key = f"budget-reservation:{manpower_req['request_code']}"
+    ok, code, data, partner = _call_partner(
+        "keuangan",
+        "POST",
+        "check_recruitment_budget",
+        json_body=payload,
+        extra_headers={"Idempotency-Key": idem_key},
+    )
     if not ok:
+        if code == 422:
+            with db_session() as conn:
+                conn.execute(
+                    "UPDATE manpower_requests SET finance_budget_status = 'REJECTED' WHERE id = ?",
+                    (manpower_req["id"],),
+                )
+            return {"success": False, "status_code": 422, "finance_budget_status": "REJECTED", "error": data}
         return {"success": False, "status_code": code, "error": data}
 
     fmap = partner["field_mapping"]
-    approved = bool(data.get(fmap.get("approved_field", "approved"), False))
-    fin_ref = str(data.get(fmap.get("reference_field", "finance_ref"), "") or f"BGT-{manpower_req['request_code']}")
-    new_status = "APPROVED" if approved else "REJECTED"
+    raw_status = str(data.get("status") or "").upper()
+    if raw_status in ("APPROVED", "PENDING_APPROVAL", "REJECTED"):
+        new_status = raw_status
+    else:
+        approved = bool(data.get(fmap.get("approved_field", "approved"), False))
+        new_status = "APPROVED" if approved else "REJECTED"
+    fin_ref = str(
+        data.get(fmap.get("reference_field", "finance_ref"))
+        or data.get("reservation_id")
+        or data.get("id")
+        or f"BGT-{manpower_req['request_code']}"
+    )
 
     with db_session() as conn:
         conn.execute(

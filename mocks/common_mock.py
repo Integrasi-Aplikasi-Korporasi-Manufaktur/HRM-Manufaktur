@@ -2,6 +2,7 @@
 import os
 import secrets
 import time
+import uuid
 from typing import Any
 
 import requests
@@ -32,6 +33,14 @@ def create_mock_app(
     """Membuat instance FastAPI ringan dengan endpoint /health, /oauth/token, dan dependency auth."""
     app = FastAPI(title=f"{group_label} — {service_name} (Mock Kasar)")
     tokens: dict[str, float] = {}
+
+    @app.middleware("http")
+    async def mock_request_id_middleware(request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = req_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
 
     @app.get("/health")
     def health():
@@ -64,6 +73,7 @@ def call_hrm_endpoint(
     client_id: str,
     client_secret: str,
     json_body: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> tuple[bool, Any]:
     """Helper mock server untuk memanggil API HRM (dengan /oauth/token)."""
     hrm_base = get_hrm_base_url()
@@ -71,16 +81,25 @@ def call_hrm_endpoint(
         tok_resp = requests.post(
             f"{hrm_base}/oauth/token",
             json={"client_id": client_id, "client_secret": client_secret},
-            headers={"ngrok-skip-browser-warning": "true"},
+            headers={"ngrok-skip-browser-warning": "true", "X-Request-ID": str(uuid.uuid4())},
             timeout=6,
         )
         if tok_resp.status_code != 200:
             return False, f"Gagal dapat token HRM ({tok_resp.status_code}): {tok_resp.text}"
         token = tok_resp.json()["access_token"]
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "ngrok-skip-browser-warning": "true",
+            "X-Request-ID": str(uuid.uuid4()),
+        }
+        if extra_headers:
+            for k, v in extra_headers.items():
+                if k.lower() != "authorization":
+                    headers[k] = v
         resp = requests.request(
             method=method.upper(),
             url=f"{hrm_base}{path}",
-            headers={"Authorization": f"Bearer {token}", "ngrok-skip-browser-warning": "true"},
+            headers=headers,
             json=json_body,
             timeout=8,
         )

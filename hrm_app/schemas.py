@@ -87,9 +87,11 @@ class ManpowerRequestCreate(BaseModel):
     requester_system: Literal["INTERNAL", "SCM", "CRM"] = "INTERNAL"
     department_id: Optional[int] = None
     department_code: Optional[str] = None
+    cost_center: Optional[str] = None
     position_title: str = Field(..., min_length=2)
     headcount: int = Field(default=1, ge=1)
     estimated_salary: int = Field(default=7000000, ge=0)
+    period: str = Field(default="2026-11", pattern=r"^\d{4}-\d{2}$")
     reason: str = Field(..., min_length=3)
 
 
@@ -114,9 +116,18 @@ class PayrollGenerateRequest(BaseModel):
 
 
 class PaymentCallbackRequest(BaseModel):
-    status: Literal["PAID", "REJECTED"]
+    status: Optional[Literal["UNPAID", "PAID", "FAILED", "REJECTED"]] = None
+    payment_status: Optional[Literal["UNPAID", "PAID", "FAILED", "REJECTED"]] = None
     finance_ref: str = ""
+    amount_minor: Optional[int] = Field(default=None, ge=0)
+    currency: str = "IDR"
     note: str = ""
+
+    def resolved_status(self) -> str:
+        val = self.payment_status or self.status
+        if not val:
+            raise ValueError("Field 'payment_status' atau 'status' wajib diisi.")
+        return val
 
 
 class PartnerConfigUpdate(BaseModel):

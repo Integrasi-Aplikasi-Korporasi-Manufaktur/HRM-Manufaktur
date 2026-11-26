@@ -122,11 +122,14 @@ async function loadPayroll() {
 
   document.getElementById("payroll-items-body").innerHTML = data.items.map(it => {
     const totDed = it.tax_pph21 + it.bpjs_deduction + it.absent_deduction;
+    const slipBtn = data.status === "PAID"
+      ? `<button onclick="openPayslip(${it.id})" class="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-100">Slip</button>`
+      : `<button disabled title="Slip gaji baru aktif setelah PaymentStatus = PAID dari Keuangan" class="px-2.5 py-1 border border-slate-200 rounded text-slate-400 bg-slate-50 cursor-not-allowed">Terkunci</button>`;
     return `
       <tr class="hover:bg-slate-50">
         <td class="p-3">
           <div class="font-semibold text-slate-900">${esc(it.employee_code)} · ${esc(it.full_name)}</div>
-          <div class="text-[11px] text-slate-500">${esc(it.department_name)} · ${esc(it.position_title)}</div>
+          <div class="text-[11px] text-slate-500">${esc(it.department_name)} (${esc(it.cost_center || '-')}) · ${esc(it.position_title)}</div>
         </td>
         <td class="p-3 text-right">${formatRupiah(it.base_salary + it.fixed_allowance)}</td>
         <td class="p-3 text-right">
@@ -140,9 +143,7 @@ async function loadPayroll() {
         <td class="p-3 text-right text-rose-700">-${formatRupiah(totDed)}</td>
         <td class="p-3 text-right font-bold text-emerald-700">${formatRupiah(it.net_salary)}</td>
         <td class="p-3 text-slate-600">${esc(it.note || "-")}</td>
-        <td class="p-3 text-right">
-          <button onclick="openPayslip(${it.id})" class="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-100">Slip</button>
-        </td>
+        <td class="p-3 text-right">${slipBtn}</td>
       </tr>
     `;
   }).join("");
@@ -194,40 +195,44 @@ async function pollFinanceStatus() {
 }
 
 async function openPayslip(itemId) {
-  const p = await apiFetch(`/api/v1/payroll/payslip/${itemId}`);
-  document.getElementById("payslip-content").innerHTML = `
-    <div class="border-b border-slate-200 pb-3">
-      <div class="font-bold text-base text-slate-900">{{ company.company_name }}</div>
-      <div class="text-xs text-slate-500">SLIP GAJI KARYAWAN · Periode ${esc(p.period)} (${esc(p.batch_code)})</div>
-    </div>
-    <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg">
-      <div><span class="text-slate-500">Nama:</span> <b>${esc(p.full_name)}</b></div>
-      <div><span class="text-slate-500">Kode:</span> <b class="font-mono">${esc(p.employee_code)}</b></div>
-      <div><span class="text-slate-500">Jabatan:</span> ${esc(p.position_title)}</div>
-      <div><span class="text-slate-500">Departemen:</span> ${esc(p.department_name)}</div>
-      <div><span class="text-slate-500">Transfer:</span> ${esc(p.bank_name)} ${esc(p.bank_account)}</div>
-      <div><span class="text-slate-500">Status Batch:</span> ${statusBadge(p.batch_status)}</div>
-    </div>
-    <div class="space-y-1.5 text-xs">
-      <div class="font-bold text-slate-700 uppercase">Penerimaan</div>
-      <div class="flex justify-between"><span>Gaji Pokok</span><span>${formatRupiah(p.base_salary)}</span></div>
-      <div class="flex justify-between"><span>Tunjangan Tetap</span><span>${formatRupiah(p.fixed_allowance)}</span></div>
-      <div class="flex justify-between"><span>Upah Lembur (${p.overtime_hours} jam)</span><span>${formatRupiah(p.overtime_pay)}</span></div>
-      <div class="flex justify-between"><span>Komisi Sales (dari CRM)</span><span>${formatRupiah(p.crm_commission)}</span></div>
-      <div class="flex justify-between font-bold border-t border-slate-200 pt-1"><span>Total Pendapatan Kotor</span><span>${formatRupiah(p.gross_salary)}</span></div>
-    </div>
-    <div class="space-y-1.5 text-xs">
-      <div class="font-bold text-slate-700 uppercase">Potongan</div>
-      <div class="flex justify-between text-rose-700"><span>PPh 21</span><span>-${formatRupiah(p.tax_pph21)}</span></div>
-      <div class="flex justify-between text-rose-700"><span>BPJS Kesehatan & Ketenagakerjaan (3%)</span><span>-${formatRupiah(p.bpjs_deduction)}</span></div>
-      <div class="flex justify-between text-rose-700"><span>Potongan Alpha</span><span>-${formatRupiah(p.absent_deduction)}</span></div>
-    </div>
-    <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex justify-between items-center">
-      <span class="font-bold text-emerald-900">TAKE HOME PAY (GAJI BERSIH)</span>
-      <span class="text-lg font-bold text-emerald-700">${formatRupiah(p.net_salary)}</span>
-    </div>
-  `;
-  openModal("payslip-modal");
+  try {
+    const p = await apiFetch(`/api/v1/payroll/payslip/${itemId}`);
+    document.getElementById("payslip-content").innerHTML = `
+      <div class="border-b border-slate-200 pb-3">
+        <div class="font-bold text-base text-slate-900">{{ company.company_name }}</div>
+        <div class="text-xs text-slate-500">SLIP GAJI KARYAWAN · Periode ${esc(p.period)} (${esc(p.batch_code)})</div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg">
+        <div><span class="text-slate-500">Nama:</span> <b>${esc(p.full_name)}</b></div>
+        <div><span class="text-slate-500">Kode:</span> <b class="font-mono">${esc(p.employee_code)}</b></div>
+        <div><span class="text-slate-500">Jabatan:</span> ${esc(p.position_title)}</div>
+        <div><span class="text-slate-500">Departemen:</span> ${esc(p.department_name)} (${esc(p.cost_center || '-')})</div>
+        <div><span class="text-slate-500">Transfer:</span> ${esc(p.bank_name)} ${esc(p.bank_account)}</div>
+        <div><span class="text-slate-500">Status Batch:</span> ${statusBadge(p.batch_status)}</div>
+      </div>
+      <div class="space-y-1.5 text-xs">
+        <div class="font-bold text-slate-700 uppercase">Penerimaan</div>
+        <div class="flex justify-between"><span>Gaji Pokok</span><span>${formatRupiah(p.base_salary)}</span></div>
+        <div class="flex justify-between"><span>Tunjangan Tetap</span><span>${formatRupiah(p.fixed_allowance)}</span></div>
+        <div class="flex justify-between"><span>Upah Lembur (${p.overtime_hours} jam)</span><span>${formatRupiah(p.overtime_pay)}</span></div>
+        <div class="flex justify-between"><span>Komisi Sales (dari CRM)</span><span>${formatRupiah(p.crm_commission)}</span></div>
+        <div class="flex justify-between font-bold border-t border-slate-200 pt-1"><span>Total Pendapatan Kotor</span><span>${formatRupiah(p.gross_salary)}</span></div>
+      </div>
+      <div class="space-y-1.5 text-xs">
+        <div class="font-bold text-slate-700 uppercase">Potongan</div>
+        <div class="flex justify-between text-rose-700"><span>PPh 21</span><span>-${formatRupiah(p.tax_pph21)}</span></div>
+        <div class="flex justify-between text-rose-700"><span>BPJS Kesehatan & Ketenagakerjaan (3%)</span><span>-${formatRupiah(p.bpjs_deduction)}</span></div>
+        <div class="flex justify-between text-rose-700"><span>Potongan Alpha</span><span>-${formatRupiah(p.absent_deduction)}</span></div>
+      </div>
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex justify-between items-center">
+        <span class="font-bold text-emerald-900">TAKE HOME PAY (GAJI BERSIH)</span>
+        <span class="text-lg font-bold text-emerald-700">${formatRupiah(p.net_salary)}</span>
+      </div>
+    `;
+    openModal("payslip-modal");
+  } catch (err) {
+    showToast(err.message, "error");
+  }
 }
 
 loadPayroll();

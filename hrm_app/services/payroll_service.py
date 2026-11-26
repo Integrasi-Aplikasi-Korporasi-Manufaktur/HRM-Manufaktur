@@ -158,7 +158,7 @@ def get_payroll_run(period: str) -> dict[str, Any] | None:
             """
             SELECT pi.*, e.employee_code, e.full_name, e.position_title,
                    e.bank_name, e.bank_account, e.integration_role,
-                   d.name AS department_name
+                   d.code AS department_code, d.name AS department_name, d.cost_center
             FROM payroll_items pi
             JOIN employees e ON e.id = pi.employee_id
             JOIN departments d ON d.id = e.department_id
@@ -186,7 +186,7 @@ def get_payslip_item(item_id: int) -> dict[str, Any] | None:
             """
             SELECT pi.*, pr.batch_code, pr.period, pr.status AS batch_status, pr.finance_batch_ref,
                    e.employee_code, e.full_name, e.email, e.position_title, e.employment_type,
-                   e.bank_name, e.bank_account, d.name AS department_name
+                   e.bank_name, e.bank_account, d.code AS department_code, d.name AS department_name, d.cost_center
             FROM payroll_items pi
             JOIN payroll_runs pr ON pr.id = pi.payroll_run_id
             JOIN employees e ON e.id = pi.employee_id

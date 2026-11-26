@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS manpower_requests (
     position_title TEXT NOT NULL,
     headcount INTEGER NOT NULL DEFAULT 1,
     estimated_salary INTEGER NOT NULL DEFAULT 0,
+    period TEXT NOT NULL DEFAULT '2026-11',
     reason TEXT NOT NULL,
     finance_budget_status TEXT NOT NULL DEFAULT 'BELUM_CEK',
     finance_ref TEXT DEFAULT '',
@@ -187,6 +188,15 @@ CREATE TABLE IF NOT EXISTS integration_logs (
     response_summary TEXT DEFAULT '',
     success INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+    idempotency_key TEXT PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -218,3 +228,6 @@ def init_schema(db_path: Path | None = None) -> None:
     """Membuat seluruh tabel skema HRM jika belum tersedia."""
     with db_session(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(manpower_requests)").fetchall()}
+        if "period" not in cols:
+            conn.execute("ALTER TABLE manpower_requests ADD COLUMN period TEXT NOT NULL DEFAULT '2026-11'")

@@ -1,8 +1,13 @@
 # Sistem HRM Terintegrasi — Kelompok 12 (Final Project UAS IAK)
 
-Proyek ini berfokus penuh pada pengembangan **Sistem Human Resource Management (HRM — Kelompok 12)** yang lengkap, modular, dan siap dihubungkan dengan **Kelompok 2 (Keuangan)**, **Kelompok 7 (CRM)**, dan **Kelompok 8 (SCM)**.
+Proyek ini berfokus penuh pada pengembangan **Sistem Human Resource Management (HRM — Kelompok 12)** untuk studi kasus manufaktur **PT Panata Jaya Mandiri** yang selaras dengan **kontrak API kanonik 4 divisi** bersama **Kelompok 2 (Keuangan)**, **Kelompok 7 (CRM)**, dan **Kelompok 8 (SCM)**.
 
-Selama belum ada kesepakatan teknis akhir dengan kelompok lain, proyek ini menyertakan **3 Simulator Kasar (Mock Servers)** pada port terpisah sehingga seluruh alur integrasi REST API dua arah dapat diuji secara nyata sejak sekarang.
+- **Live Online Portal (24/7 Railway):** https://hrm-panata-jaya-mandiri.up.railway.app
+- **Swagger / OpenAPI Docs:** https://hrm-panata-jaya-mandiri.up.railway.app/docs
+- **GitHub Organisasi (Grup Manufaktur):** https://github.com/Integrasi-Aplikasi-Korporasi-Manufaktur/HRM-Manufaktur
+- **GitHub Personal Mirror:** https://github.com/Ezra696969/HumanResourceManagement
+
+Selama belum ada kesepakatan deployment akhir dengan server masing-masing kelompok mitra, proyek ini menyertakan **3 Simulator Kasar (Mock Servers)** pada port terpisah maupun terpadu di `/mock/keuangan/`, `/mock/crm/`, dan `/mock/scm/` sehingga seluruh alur integrasi REST API dua arah dapat diuji secara nyata sejak sekarang.
 
 ---
 
@@ -10,8 +15,8 @@ Selama belum ada kesepakatan teknis akhir dengan kelompok lain, proyek ini menye
 
 | Layanan | Kelompok | Port Default | Keterangan |
 | :--- | :--- | :---: | :--- |
-| **Sistem HRM (UTAMA)** | **Kelompok 12** | `5000` | Web UI lengkap + REST API Provider + OpenAPI `/docs` + SQLite |
-| Mock Keuangan (Kasar) | Simulasi Kel. 2 | `5001` | Menerima tagihan payroll, cek anggaran rekrutmen, tombol Bayar (LUNAS) |
+| **Sistem HRM (UTAMA)** | **Kelompok 12** | `5000` | Web UI lengkap + REST API Provider + OpenAPI `/docs` + SQLite (14 tabel) |
+| Mock Keuangan (Kasar) | Simulasi Kel. 2 | `5001` | Endpoint kanonik `POST /v1/budget-reservations`, `GET /v1/budgets/{cost_center}/remaining`, `POST /v1/payroll-accruals`, `GET /v1/payroll-accruals/{run_id}`, validasi `422`/`409`, & callback `PaymentStatus` (`PAID`/`FAILED`) |
 | Mock CRM (Kasar) | Simulasi Kel. 7 | `5002` | Menyediakan data komisi sales & menarik daftar sales dari HRM |
 | Mock SCM (Kasar) | Simulasi Kel. 8 | `5003` | Menyediakan lembur operasional, kirim manpower request, & tarik staf ops |
 
@@ -37,11 +42,11 @@ Selama belum ada kesepakatan teknis akhir dengan kelompok lain, proyek ini menye
 ## Fitur Utama HRM (Kelompok 12)
 
 1. **Multi-Tema Studi Kasus (1 Klik):** Melalui dropdown **Tema Studi Kasus** di kanan atas header, seluruh profil perusahaan, departemen, karyawan, sertifikasi, dan lowongan langsung menyesuaikan studi kasus **Software**, **Manufaktur**, atau **Telekomunikasi**.
-2. **Manajemen Karyawan & Sertifikasi:** CRUD karyawan, pengelompokan `integration_role` (`CRM_SALES`, `SCM_OPS`, `INTERNAL`, `FINANCE`), dan manajemen sertifikasi/skill.
+2. **Manajemen Karyawan, Cost Center & Gate K3:** CRUD karyawan, pengelompokan `integration_role` (`CRM_SALES`, `SCM_OPS`, `INTERNAL`, `FINANCE`), kode master `cost_center` (`CC-100`..`CC-500`), dan status validitas sertifikasi K3 (`k3_valid`, `k3_status`, `assignable`) untuk memblokir operator dengan sertifikat kedaluwarsa.
 3. **Absensi, Lembur & Cuti:** Input absensi harian, persetujuan cuti dengan pemotongan kuota otomatis, serta tombol **Tarik Lembur dari SCM**.
-4. **Rekrutmen & Auto-Onboarding:** Menerima permintaan SDM (internal maupun API SCM), tombol **Cek Budget ke Keuangan**, dan konversi otomatis kandidat `HIRED` menjadi karyawan aktif baru (`EMP-xxx`).
-5. **Payroll Engine & Slip Gaji:** Menghitung gaji pokok + tunjangan + lembur (Internal & SCM) + komisi sales (CRM) − potongan PPh21/BPJS/Alpha, mengirim rekap ke Keuangan, memantau status pembayaran, serta cetak **Slip Gaji Digital**.
-6. **Integration Hub (Siap Disambung ke Kelompok Lain):** Mengedit URL (`localhost` maupun `ngrok`), metode autentikasi (`OAUTH_BEARER` / `API_KEY` / `NONE`), *field mapping* JSON, mengelola `client_id` mitra, dan memantau *live audit log* Inbound/Outbound.
+4. **Rekrutmen, BudgetReservation & Auto-Onboarding:** Menerima permintaan SDM (internal maupun API SCM/CRM), tombol **Sisa Anggaran** (`GET /v1/budgets/{cost_center}/remaining`), tombol **Reservasi Budget** (`POST /v1/budget-reservations` dengan `Idempotency-Key`, status `APPROVED`/`PENDING_APPROVAL`/`REJECTED`, penolakan `422 BUDGET_INSUFFICIENT`), dan konversi otomatis kandidat `HIRED` menjadi karyawan aktif baru (`EMP-xxx`).
+5. **Payroll Engine (`PayrollAccrual`) & Slip Gaji Terproteksi:** Menghitung gaji pokok + tunjangan + lembur (Internal & SCM) + komisi sales (CRM) − potongan PPh21/BPJS/Alpha, validasi total baris (`422 PAYROLL_TOTAL_MISMATCH`), mengirim `PayrollAccrual` per `cost_center` (`POST /v1/payroll-accruals` dengan `Idempotency-Key`), menerima callback boundary `PaymentStatus` (`UNPAID`/`PAID`/`FAILED` dengan aturan `409 Conflict`), serta mengunci cetak **Slip Gaji Digital** hingga `PaymentStatus = PAID` (`422 PAYSLIP_NOT_PAID` sebelum lunas).
+6. **Integration Hub, `X-Request-ID` & Audit Log:** Mengedit URL (`localhost`, `ngrok`, maupun hosting) dan *field mapping* JSON, pelacakan header `X-Request-ID`, error envelope standar `{"error": {"code", "message", "request_id"}}`, mengelola `client_id` mitra, dan memantau *live audit log* Inbound/Outbound.
 
 ---
 

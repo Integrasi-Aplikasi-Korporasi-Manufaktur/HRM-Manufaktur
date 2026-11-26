@@ -47,9 +47,11 @@ async function apiFetch(url, options = {}) {
   }
   if (!res.ok) {
     const detail = data?.detail;
-    const msg = typeof detail === "string"
-      ? detail
-      : detail?.error?.error || detail?.error || JSON.stringify(detail || `HTTP ${res.status}`);
+    const msg =
+      data?.error?.message ||
+      (typeof detail === "string"
+        ? detail
+        : detail?.error?.message || detail?.error?.error || detail?.message || detail?.error || JSON.stringify(detail || `HTTP ${res.status}`));
     throw new Error(msg);
   }
   return data;
@@ -67,12 +69,15 @@ function statusBadge(status) {
     FILLED: "badge-green",
     HADIR: "badge-green",
     SENT_TO_FINANCE: "badge-blue",
+    POSTED: "badge-blue",
     FINAL: "badge-blue",
     INTERVIEW: "badge-blue",
     OPEN: "badge-blue",
     SCREENING: "badge-purple",
     OFFERED: "badge-purple",
     PENDING: "badge-amber",
+    PENDING_APPROVAL: "badge-amber",
+    UNPAID: "badge-amber",
     BELUM_CEK: "badge-amber",
     CUTI: "badge-amber",
     TERLAMBAT: "badge-amber",
@@ -84,6 +89,7 @@ function statusBadge(status) {
     NONAKTIF: "badge-red",
     OFFLINE: "badge-red",
     REJECTED: "badge-red",
+    FAILED: "badge-red",
     ALPHA: "badge-red",
   };
   return `<span class="badge ${map[s] || "badge-slate"}">${esc(s)}</span>`;
